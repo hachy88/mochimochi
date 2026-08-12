@@ -1,0 +1,1211 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MochiMochi Avatar Studio | AI背景切り抜き＆2D ARAP 弾性変形</title>
+    <meta name="description"
+        content="画像の背景をAIで自動切り抜きし，2D ARAP (As-Rigid-As-Possible) 弾性物理シミュレーションでモチモチ自由に変形・操作できるアバター表現ツールです．">
+    <!-- PixiJS & D3-Delaunay -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pixi.js/7.3.2/pixi.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/d3-delaunay@6"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --card-bg: rgba(30, 41, 59, 0.75);
+            --card-border: rgba(255, 255, 255, 0.1);
+            --primary: #6366f1;
+            --primary-hover: #4f46e5;
+            --primary-glow: rgba(99, 102, 241, 0.4);
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --accent-blue: #38bdf8;
+            --accent-green: #10b981;
+            --accent-red: #f43f5e;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+            background-color: var(--bg-color);
+            background-image:
+                radial-gradient(at 0% 0%, rgba(99, 102, 241, 0.15) 0px, transparent 50%),
+                radial-gradient(at 100% 100%, rgba(139, 92, 246, 0.15) 0px, transparent 50%);
+            color: var(--text-main);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+
+        /* Step 1: Upload Container */
+        #uploadView {
+            width: 100%;
+            max-width: 720px;
+            background: var(--card-bg);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid var(--card-border);
+            border-radius: 24px;
+            padding: 40px 32px;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.4);
+            text-align: center;
+            transition: all 0.3s ease;
+        }
+
+        header h1 {
+            font-size: 1.875rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, #ffffff 0%, #cbd5e1 100%);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 8px;
+        }
+
+        header p {
+            color: var(--text-muted);
+            font-size: 0.95rem;
+            margin-bottom: 28px;
+        }
+
+        .protocol-warning {
+            display: none;
+            background: rgba(239, 68, 68, 0.15);
+            border: 1px solid rgba(239, 68, 68, 0.4);
+            color: #fca5a5;
+            padding: 12px 16px;
+            border-radius: 12px;
+            font-size: 0.875rem;
+            margin-bottom: 24px;
+            text-align: left;
+            line-height: 1.5;
+        }
+
+        .protocol-warning code {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: monospace;
+            color: #fff;
+        }
+
+        .dropzone {
+            border: 2px dashed rgba(255, 255, 255, 0.2);
+            border-radius: 16px;
+            padding: 44px 20px;
+            cursor: pointer;
+            transition: all 0.25s ease;
+            background: rgba(15, 23, 42, 0.4);
+            position: relative;
+        }
+
+        .dropzone:hover,
+        .dropzone.dragover {
+            border-color: var(--primary);
+            background: rgba(99, 102, 241, 0.08);
+            box-shadow: 0 0 20px var(--primary-glow);
+        }
+
+        .dropzone-icon {
+            width: 56px;
+            height: 56px;
+            margin: 0 auto 16px;
+            background: rgba(99, 102, 241, 0.15);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--primary);
+        }
+
+        .dropzone-icon svg {
+            width: 28px;
+            height: 28px;
+            stroke-width: 2;
+        }
+
+        .dropzone-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin-bottom: 6px;
+        }
+
+        .dropzone-subtitle {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+        }
+
+        .dropzone-subtitle span {
+            color: var(--primary);
+            text-decoration: underline;
+            font-weight: 500;
+        }
+
+        #fileInput {
+            display: none;
+        }
+
+        .progress-container {
+            display: none;
+            margin-top: 24px;
+            text-align: left;
+        }
+
+        .progress-header {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.875rem;
+            margin-bottom: 8px;
+        }
+
+        .progress-status {
+            color: var(--text-main);
+            font-weight: 500;
+        }
+
+        .progress-percentage {
+            color: var(--primary);
+            font-weight: 600;
+        }
+
+        .progress-bar-bg {
+            width: 100%;
+            height: 8px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .progress-bar-fill {
+            width: 0%;
+            height: 100%;
+            background: linear-gradient(90deg, var(--primary) 0%, #8b5cf6 100%);
+            transition: width 0.2s ease;
+            border-radius: 4px;
+        }
+
+        .error-message {
+            display: none;
+            color: var(--accent-red);
+            background: rgba(244, 63, 94, 0.1);
+            border: 1px solid rgba(244, 63, 94, 0.2);
+            padding: 12px 16px;
+            border-radius: 12px;
+            font-size: 0.875rem;
+            margin-top: 16px;
+        }
+
+        /* Step 2: Studio View Container */
+        #studioView {
+            display: none;
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            justify-content: center;
+            align-items: center;
+            background-color: var(--bg-color);
+        }
+
+        #stageWrapper {
+            position: relative;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
+            border-radius: 16px;
+            overflow: hidden;
+            border: 1px solid var(--card-border);
+            /* Transparent checkerboard background */
+            background-image:
+                linear-gradient(45deg, #1e293b 25%, transparent 25%),
+                linear-gradient(-45deg, #1e293b 25%, transparent 25%),
+                linear-gradient(45deg, transparent 75%, #1e293b 75%),
+                linear-gradient(-45deg, transparent 75%, #1e293b 75%);
+            background-size: 20px 20px;
+            background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
+            background-color: #0f172a;
+        }
+
+        #overlayCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        #infoPanel {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: var(--card-bg);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            padding: 20px;
+            border-radius: 16px;
+            border: 1px solid var(--card-border);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+            z-index: 20;
+            font-size: 13px;
+            line-height: 1.6;
+            width: 320px;
+        }
+
+        #infoPanel h3 {
+            font-size: 1rem;
+            margin-bottom: 8px;
+            color: #fff;
+        }
+
+        .controls-list {
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .btn-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-top: 16px;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 10px 16px;
+            border-radius: 10px;
+            font-size: 0.875rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            border: none;
+            text-decoration: none;
+        }
+
+        .btn-primary {
+            background: var(--primary);
+            color: #ffffff;
+            box-shadow: 0 4px 14px var(--primary-glow);
+        }
+
+        .btn-primary:hover {
+            background: var(--primary-hover);
+            transform: translateY(-1px);
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- Step 1: Upload View -->
+    <div id="uploadView">
+        <header>
+            <h1>MochiMochi Avatar Studio</h1>
+            <p>画像をアップロード・ドラッグ＆ドロップ・クリップボード貼り付け (Ctrl+V) してください</p>
+            <p>※Wifi環境での実行を推奨します．</p>
+        </header>
+
+        <div id="protocolWarning" class="protocol-warning">
+            ⚠️ <strong>Webサーバー経由で開く必要があります</strong><br>
+            ブラウザのセキュリティ制限（CORS/WebWorker）により <code>file://</code> プロトコルからはAIモデルが動作しません．<br>
+            PowerShell等で <code>npx serve .</code> や <code>python -m http.server</code>
+            を実行し，<code>http://localhost:3000</code> からアクセスしてください．
+        </div>
+
+        <div id="dropzone" class="dropzone">
+            <div class="dropzone-icon">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round"
+                        d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2H6a2 2 0 00-2 2v12a2 2 0 002 2z">
+                    </path>
+                </svg>
+            </div>
+            <div class="dropzone-title">画像をドラッグ＆ドロップ</div>
+            <div class="dropzone-subtitle">または <span>ファイルを選択</span> / Ctrl+V で貼り付け</div>
+            <input type="file" id="fileInput" accept="image/png, image/jpeg, image/webp">
+        </div>
+
+        <div id="progressContainer" class="progress-container">
+            <div class="progress-header">
+                <span id="progressStatus" class="progress-status">AIモデルの準備中...</span>
+                <span id="progressPercentage" class="progress-percentage">0%</span>
+            </div>
+            <div class="progress-bar-bg">
+                <div id="progressBarFill" class="progress-bar-fill"></div>
+            </div>
+        </div>
+
+        <div id="errorMessage" class="error-message"></div>
+    </div>
+
+    <!-- Step 2: ARAP Transformation Studio View -->
+    <div id="studioView">
+        <div id="infoPanel">
+            <h3>もちもち</h3>
+            <ul class="controls-list">
+            </ul>
+
+            <div class="btn-group">
+                <button id="reuploadBtn" class="btn btn-primary">
+                    <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+                    </svg>
+                    新しい画像をアップロード
+                </button>
+            </div>
+        </div>
+
+        <div id="stageWrapper">
+            <canvas id="overlayCanvas"></canvas>
+        </div>
+    </div>
+
+    <script type="module">
+        import removeBackground from 'https://esm.sh/@imgly/background-removal@1.4.5';
+
+        // DOM elements
+        const uploadView = document.getElementById('uploadView');
+        const studioView = document.getElementById('studioView');
+        const dropzone = document.getElementById('dropzone');
+        const fileInput = document.getElementById('fileInput');
+        const progressContainer = document.getElementById('progressContainer');
+        const progressStatus = document.getElementById('progressStatus');
+        const progressPercentage = document.getElementById('progressPercentage');
+        const progressBarFill = document.getElementById('progressBarFill');
+        const errorMessage = document.getElementById('errorMessage');
+        const protocolWarning = document.getElementById('protocolWarning');
+
+        const stageWrapper = document.getElementById('stageWrapper');
+        const overlayCanvas = document.getElementById('overlayCanvas');
+        const reuploadBtn = document.getElementById('reuploadBtn');
+
+        let currentObjectUrl = null;
+
+        // Protocol check
+        if (window.location.protocol === 'file:') {
+            protocolWarning.style.display = 'block';
+        }
+
+        // Setup Ingestion Event Listeners
+        dropzone.addEventListener('click', () => fileInput.click());
+
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files && e.target.files[0]) {
+                processImage(e.target.files[0]);
+            }
+        });
+
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropzone.addEventListener(eventName, (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                dropzone.classList.add('dragover');
+            }, false);
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropzone.addEventListener(eventName, (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                dropzone.classList.remove('dragover');
+            }, false);
+        });
+
+        dropzone.addEventListener('drop', (e) => {
+            const dt = e.dataTransfer;
+            if (dt.files && dt.files[0]) {
+                processImage(dt.files[0]);
+            }
+        });
+
+        window.addEventListener('paste', (e) => {
+            const items = e.clipboardData?.items;
+            if (!items) return;
+            for (let i = 0; i < items.length; i++) {
+                if (items[i].type.indexOf('image') !== -1) {
+                    const blob = items[i].getAsFile();
+                    if (blob) processImage(blob);
+                    break;
+                }
+            }
+        });
+
+        reuploadBtn.addEventListener('click', resetToUpload);
+
+        function resetToUpload() {
+            if (currentObjectUrl) {
+                URL.revokeObjectURL(currentObjectUrl);
+                currentObjectUrl = null;
+            }
+            if (app) {
+                app.destroy(true, { children: true, texture: true, baseTexture: true });
+                app = null;
+            }
+            screamManager.clear();
+            uploadView.style.display = 'block';
+            studioView.style.display = 'none';
+            dropzone.style.display = 'block';
+            progressContainer.style.display = 'none';
+            errorMessage.style.display = 'none';
+            fileInput.value = '';
+        }
+
+        function updateProgress(percent, text) {
+            progressContainer.style.display = 'block';
+            progressBarFill.style.width = `${percent}%`;
+            progressPercentage.innerText = `${percent}%`;
+            progressStatus.innerText = text;
+        }
+
+        function showError(msg) {
+            errorMessage.innerText = msg;
+            errorMessage.style.display = 'block';
+            progressContainer.style.display = 'none';
+            dropzone.style.display = 'block';
+        }
+
+        async function processImage(file) {
+            if (!file.type.startsWith('image/')) {
+                showError('画像ファイル (PNG, JPEG, WebP) を選択してください．');
+                return;
+            }
+
+            dropzone.style.display = 'none';
+            errorMessage.style.display = 'none';
+
+            updateProgress(0, 'AI背景切り抜き処理を開始中...');
+
+            try {
+                const config = {
+                    publicPath: 'https://unpkg.com/@imgly/background-removal-data@1.4.5/dist/',
+                    progress: (key, current, total) => {
+                        if (total > 0) {
+                            const pct = Math.round((current / total) * 100);
+                            updateProgress(pct, `AIモデルロード中 (${key}): ${pct}%`);
+                        } else {
+                            updateProgress(50, `AI処理中 (${key})...`);
+                        }
+                    },
+                    output: {
+                        format: 'image/png',
+                        quality: 1.0
+                    }
+                };
+
+                let blob;
+                try {
+                    blob = await removeBackground(file, config);
+                } catch (firstErr) {
+                    console.warn("Primary CDN failed, retrying with fallback...", firstErr);
+                    updateProgress(10, 'Fallback CDNで再試行中...');
+                    config.publicPath = 'https://staticimgly.com/background-removal-data/1.4.5/dist/';
+                    blob = await removeBackground(file, config);
+                }
+
+                updateProgress(100, '背景切り抜き完了！ メッシュ構成中...');
+
+                if (currentObjectUrl) {
+                    URL.revokeObjectURL(currentObjectUrl);
+                }
+
+                currentObjectUrl = URL.createObjectURL(blob);
+
+                const imgElement = new Image();
+                imgElement.onload = () => {
+                    uploadView.style.display = 'none';
+                    studioView.style.display = 'flex';
+                    initARAPStudio(imgElement, currentObjectUrl);
+                };
+                imgElement.onerror = (err) => showError('処理された画像の読み込みに失敗しました．');
+                imgElement.src = currentObjectUrl;
+
+            } catch (error) {
+                console.error('Background removal failed:', error);
+                showError(`背景切り抜き処理に失敗しました: ${error.message || error}`);
+            }
+        }
+
+        // ==========================================
+        // 音韻文法ベース 叫び声生成モジュール
+        // ==========================================
+        class ScreamGenerator {
+            // 1. 拗音・濁音・高エネルギー語頭集合
+            static PREFIXES = ['', '', '', 'う', 'ど', 'い', 'あ', 'え'];
+            static ONSETS = [
+                { text: 'ぎゃ', vowel: 'あ' },
+                { text: 'ぎゃ', vowel: 'ー' },
+                { text: 'ちゃ', vowel: 'あ' },
+                { text: 'わ', vowel: 'ー' },
+                { text: 'や', vowel: 'ー' },
+                { text: 'どあ', vowel: 'あ' },
+                { text: 'いや', vowel: 'ー' },
+                { text: 'め', vowel: 'ー' }
+            ];
+
+            // 2. 促音終止用ベース音集合
+            static GLOTTAL_BASES = ['ぶへ', 'や', 'あっ', 'うぎゃ', 'あば', 'えぎ', 'ひえ'];
+
+            // 3. 反復・感情語ベース集合
+            static ITERATION_BASES = [
+                { base: 'どわ', char: 'わ' },
+                { base: 'わ', char: 'お' },
+                { base: 'くそ', char: 'お' },
+                { base: 'あば', char: 'あ' },
+                { base: 'えぎ', char: 'い' }
+            ];
+
+            /**
+             * 音韻規則に基づき，自然な叫び声（3~5文字）を生成する．
+             * @returns {string}
+             */
+            static generate() {
+                const rand = Math.random();
+                let result = '';
+
+                if (rand < 0.40) {
+                    // Pattern 1: 拗音・濁音伸長モデル
+                    const prefix = this.getRandomElement(this.PREFIXES);
+                    const onsetObj = this.getRandomElement(this.ONSETS);
+                    result = prefix + onsetObj.text;
+
+                    // 規定長に達するまで同母音または長音を付与
+                    while (result.length < 5) {
+                        result += onsetObj.vowel;
+                    }
+                } else if (rand < 0.65) {
+                    // Pattern 2: 促音終止モデル
+                    const base = this.getRandomElement(this.GLOTTAL_BASES);
+                    result = base + 'っ';
+
+                    // 長さ不足時の補強（前置音の付与）
+                    if (result.length < 3) {
+                        const pre = this.getRandomElement(['う', 'あ', 'ど']);
+                        result = pre + result;
+                    }
+                } else if (rand < 0.85) {
+                    // Pattern 3: 同音反復モデル
+                    const item = this.getRandomElement(this.ITERATION_BASES);
+                    result = item.base;
+                    while (result.length < 5) {
+                        result += item.char;
+                    }
+                } else {
+                    // Pattern 4: 感情語伸長モデル
+                    const baseList = ['わー', 'いやー', 'やー', 'くそお', 'えぎい'];
+                    const base = this.getRandomElement(baseList);
+                    result = base;
+                    const lastChar = base.charAt(base.length - 1);
+                    while (result.length < 5) {
+                        result += lastChar;
+                    }
+                }
+
+                // 3〜5文字の範囲内に長さを補正（クランプおよびトリミング）
+                return this.normalizeLength(result, 3, 5);
+            }
+
+            /**
+             * 配列からランダムに1要素を抽出
+             */
+            static getRandomElement(array) {
+                return array[Math.floor(Math.random() * array.length)];
+            }
+
+            /**
+             * 文字列長を minLen 〜 maxLen の範囲に正規化する
+             */
+            static normalizeLength(str, minLen, maxLen) {
+                if (str.length > maxLen) {
+                    str = str.substring(0, maxLen);
+                }
+
+                // 不足分は末尾文字（または長音）で補填
+                while (str.length < minLen) {
+                    const lastChar = str.length > 0 ? str.charAt(str.length - 1) : 'あ';
+                    str += (lastChar === 'っ') ? 'ー' : lastChar;
+                }
+
+                return str;
+            }
+        }
+        class ScreamManager {
+            constructor() {
+                this.effects = [];
+                // 弾幕用カラーパレット（高解像度ポップカラー）
+                this.colors = ['#f43f5e', '#38bdf8', '#10b981', '#fbbf24', '#a855f7', '#ffffff'];
+            }
+
+            /**
+             * 下部1/4領域内のランダム高さから右->左へ流れる弾幕を発出する．
+             * @param {string} text 
+             * @param {{minX: number, maxX: number, yTop: number, yBottom: number}} area 
+             */
+            spawn(text, area) {
+                // 下部1/4領域の高さYをランダム設定
+                const y = area.yTop + Math.random() * (area.yBottom - area.yTop);
+
+                // 右端から左端への水流軌道パラメータ
+                const startX = area.maxX + 40;
+                const endX = area.minX - 40;
+                const duration = 2.0 + Math.random() * 0.5; // 1.0秒 ~ 1.5秒
+                const color = this.colors[Math.floor(Math.random() * this.colors.length)];
+
+                this.effects.push({
+                    text: text,
+                    startX: startX,
+                    endX: endX,
+                    x: startX,
+                    y: y,
+                    life: duration,
+                    maxLife: duration,
+                    fontSize: Math.floor(Math.random() * 8) + 24, // 24px ~ 31px
+                    color: color
+                });
+            }
+
+            updateAndRender(ctx, deltaSec) {
+                if (this.effects.length === 0) return;
+
+                for (let i = this.effects.length - 1; i >= 0; i--) {
+                    const fx = this.effects[i];
+                    fx.life -= deltaSec;
+
+                    if (fx.life <= 0) {
+                        this.effects.splice(i, 1);
+                        continue;
+                    }
+
+                    const progress = 1.0 - (fx.life / fx.maxLife);
+                    // 右から左への等速運動
+                    fx.x = fx.startX + (fx.endX - fx.startX) * progress;
+
+                    // 出現・消滅時のSmooth Fade
+                    let alpha = 1.0;
+                    if (progress < 0.08) {
+                        alpha = progress / 0.08;
+                    } else if (progress > 0.88) {
+                        alpha = (1.0 - progress) / 0.12;
+                    }
+
+                    ctx.save();
+                    ctx.globalAlpha = Math.max(0, alpha);
+                    ctx.font = `900 ${fx.fontSize}px 'Inter', system-ui, sans-serif`;
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+
+                    // コメント弾幕視認性を担保する濃色外枠
+                    ctx.strokeStyle = '#0f172a';
+                    ctx.lineWidth = 5;
+                    ctx.lineJoin = 'round';
+                    ctx.strokeText(fx.text, fx.x, fx.y);
+
+                    ctx.fillStyle = fx.color;
+                    ctx.fillText(fx.text, fx.x, fx.y);
+
+                    ctx.restore();
+                }
+            }
+
+            clear() {
+                this.effects = [];
+            }
+        }
+
+        const screamManager = new ScreamManager();
+
+        // ==========================================
+        // 2D ARAP Elastic Deformation Engine
+        // ==========================================
+        const GRID_X = 40;
+        const GRID_Y = 40;
+        const NUM_VERTICES = GRID_X * GRID_Y;
+        const PIN_WEIGHT = 1e4;
+        const K_SPRING = 180.0;
+        const C_DAMPING = 12.0;
+
+        let app = null;
+        let mesh = null;
+        let overlayCtx = null;
+
+        let renderWidth = 600;
+        let renderHeight = 600;
+
+        let origPositions, currPositions, uvs, indices;
+        let neighbors = [];
+        let weights = [];
+        let diagWeights = [];
+        let rotations;
+        let pinMask;
+
+        let activeHandleIdx = -1;
+        let isDragging = false;
+        let isReleasing = false;
+        let handleVelX = 0.0;
+        let handleVelY = 0.0;
+
+        /**
+         * キャラクター下部1/4領域のバウンディングボックス帯を取得
+         */
+        function getCharacterBottomQuarterArea() {
+            let minX = Infinity;
+            let maxX = -Infinity;
+            let minY = Infinity;
+            let maxY = -Infinity;
+
+            for (let i = 0; i < NUM_VERTICES; i++) {
+                const x = currPositions[i * 2];
+                const y = currPositions[i * 2 + 1];
+
+                if (x < minX) minX = x;
+                if (x > maxX) maxX = x;
+                if (y < minY) minY = y;
+                if (y > maxY) maxY = y;
+            }
+
+            const height = maxY - minY;
+            return {
+                minX: minX,
+                maxX: maxX,
+                yTop: maxY - (height * 0.3),   // 下部25%領域の上端
+                yBottom: maxY - (height * 0.1)    // 下部25%領域の下端
+            };
+        }
+
+        function buildMeshAndTopology(width, height) {
+            renderWidth = width;
+            renderHeight = height;
+
+            origPositions = new Float32Array(NUM_VERTICES * 2);
+            currPositions = new Float32Array(NUM_VERTICES * 2);
+            uvs = new Float32Array(NUM_VERTICES * 2);
+            pinMask = new Uint8Array(NUM_VERTICES);
+            rotations = new Float32Array(NUM_VERTICES * 2);
+
+            for (let y = 0; y < GRID_Y; y++) {
+                for (let x = 0; x < GRID_X; x++) {
+                    const idx = y * GRID_X + x;
+                    const u = x / (GRID_X - 1);
+                    const v = y / (GRID_Y - 1);
+                    const px = u * renderWidth;
+                    const py = v * renderHeight;
+
+                    origPositions[idx * 2] = currPositions[idx * 2] = px;
+                    origPositions[idx * 2 + 1] = currPositions[idx * 2 + 1] = py;
+                    uvs[idx * 2] = u;
+                    uvs[idx * 2 + 1] = v;
+
+                    if (x === 0 || x === GRID_X - 1 || y === 0 || y === GRID_Y - 1) {
+                        pinMask[idx] = 1;
+                    }
+                }
+            }
+
+            const delaunay = new d3.Delaunay(origPositions);
+            indices = new Uint32Array(delaunay.triangles);
+
+            neighbors = [];
+            weights = [];
+            diagWeights = [];
+
+            for (let i = 0; i < NUM_VERTICES; i++) {
+                neighbors[i] = [];
+                weights[i] = [];
+                diagWeights[i] = 0;
+                rotations[i * 2] = 1.0;
+                rotations[i * 2 + 1] = 0.0;
+            }
+
+            const numTriangles = indices.length / 3;
+            for (let t = 0; t < numTriangles; t++) {
+                const i0 = indices[t * 3];
+                const i1 = indices[t * 3 + 1];
+                const i2 = indices[t * 3 + 2];
+
+                addCotangentWeight(i0, i1, i2);
+                addCotangentWeight(i1, i2, i0);
+                addCotangentWeight(i2, i0, i1);
+            }
+
+            for (let i = 0; i < NUM_VERTICES; i++) {
+                neighbors[i] = new Uint32Array(neighbors[i]);
+                weights[i] = new Float32Array(weights[i]);
+            }
+        }
+
+        function addCotangentWeight(i, j, k) {
+            const pix = origPositions[i * 2], piy = origPositions[i * 2 + 1];
+            const pjx = origPositions[j * 2], pjy = origPositions[j * 2 + 1];
+            const pkx = origPositions[k * 2], pky = origPositions[k * 2 + 1];
+
+            const vix = pix - pkx, viy = piy - pky;
+            const vjx = pjx - pkx, vjy = pjy - pky;
+
+            const dot = vix * vjx + viy * vjy;
+            const cross = Math.abs(vix * vjy - viy * vjx);
+            const cot = cross < 1e-6 ? 1.0 : dot / cross;
+            const w = Math.max(0.01, cot * 0.5);
+
+            let nIdx = neighbors[i].indexOf(j);
+            if (nIdx === -1) {
+                neighbors[i].push(j);
+                weights[i].push(w);
+                diagWeights[i] += w;
+            } else {
+                weights[i][nIdx] += w;
+                diagWeights[i] += w;
+            }
+        }
+
+        function solveARAP(iterations = 3) {
+            for (let iter = 0; iter < iterations; iter++) {
+                for (let i = 0; i < NUM_VERTICES; i++) {
+                    if (pinMask[i] !== 0) continue;
+
+                    let s00 = 0, s01 = 0, s10 = 0, s11 = 0;
+                    const nList = neighbors[i];
+                    const wList = weights[i];
+
+                    const pix = origPositions[i * 2], piy = origPositions[i * 2 + 1];
+                    const cix = currPositions[i * 2], ciy = currPositions[i * 2 + 1];
+
+                    for (let n = 0; n < nList.length; n++) {
+                        const j = nList[n];
+                        const w = wList[n];
+
+                        const e0x = pix - origPositions[j * 2];
+                        const e0y = piy - origPositions[j * 2 + 1];
+                        const e1x = cix - currPositions[j * 2];
+                        const e1y = ciy - currPositions[j * 2 + 1];
+
+                        s00 += w * (e0x * e1x);
+                        s01 += w * (e0x * e1y);
+                        s10 += w * (e0y * e1x);
+                        s11 += w * (e0y * e1y);
+                    }
+
+                    const theta = Math.atan2(s10 - s01, s00 + s11);
+                    rotations[i * 2] = Math.cos(theta);
+                    rotations[i * 2 + 1] = Math.sin(theta);
+                }
+
+                solveGlobalPhaseCG(2);
+            }
+        }
+
+        function solveGlobalPhaseCG(cgSteps) {
+            for (let dim = 0; dim < 2; dim++) {
+                const b = new Float32Array(NUM_VERTICES);
+
+                for (let i = 0; i < NUM_VERTICES; i++) {
+                    let bx = 0, by = 0;
+                    const nList = neighbors[i];
+                    const wList = weights[i];
+
+                    const ci = rotations[i * 2], si = rotations[i * 2 + 1];
+
+                    for (let n = 0; n < nList.length; n++) {
+                        const j = nList[n];
+                        const w = wList[n];
+
+                        const cj = rotations[j * 2], sj = rotations[j * 2 + 1];
+                        const e0x = origPositions[i * 2] - origPositions[j * 2];
+                        const e0y = origPositions[i * 2 + 1] - origPositions[j * 2 + 1];
+
+                        const rx = (ci + cj) * e0x - (si + sj) * e0y;
+                        const ry = (si + sj) * e0x + (ci + cj) * e0y;
+
+                        bx += 0.5 * w * rx;
+                        by += 0.5 * w * ry;
+                    }
+
+                    b[i] = (dim === 0) ? bx : by;
+
+                    if (pinMask[i] !== 0) {
+                        b[i] += PIN_WEIGHT * currPositions[i * 2 + dim];
+                    }
+                }
+
+                const multiplyA = (xIn, xOut) => {
+                    for (let i = 0; i < NUM_VERTICES; i++) {
+                        let val = diagWeights[i] * xIn[i];
+                        const nList = neighbors[i];
+                        const wList = weights[i];
+
+                        for (let n = 0; n < nList.length; n++) {
+                            val -= wList[n] * xIn[nList[n]];
+                        }
+
+                        if (pinMask[i] !== 0) {
+                            val += PIN_WEIGHT * xIn[i];
+                        }
+                        xOut[i] = val;
+                    }
+                };
+
+                const x = new Float32Array(NUM_VERTICES);
+                for (let i = 0; i < NUM_VERTICES; i++) {
+                    x[i] = currPositions[i * 2 + dim];
+                }
+
+                const Ax = new Float32Array(NUM_VERTICES);
+                multiplyA(x, Ax);
+
+                const r = new Float32Array(NUM_VERTICES);
+                const p = new Float32Array(NUM_VERTICES);
+                let rsold = 0;
+
+                for (let i = 0; i < NUM_VERTICES; i++) {
+                    r[i] = b[i] - Ax[i];
+                    p[i] = r[i];
+                    rsold += r[i] * r[i];
+                }
+
+                if (rsold < 1e-6) continue;
+
+                const Ap = new Float32Array(NUM_VERTICES);
+                for (let step = 0; step < cgSteps; step++) {
+                    multiplyA(p, Ap);
+                    let pAp = 0;
+                    for (let i = 0; i < NUM_VERTICES; i++) pAp += p[i] * Ap[i];
+
+                    if (Math.abs(pAp) < 1e-10) break;
+                    const alpha = rsold / pAp;
+
+                    let rsnew = 0;
+                    for (let i = 0; i < NUM_VERTICES; i++) {
+                        x[i] += alpha * p[i];
+                        r[i] -= alpha * Ap[i];
+                        rsnew += r[i] * r[i];
+                    }
+
+                    if (rsnew < 1e-6) break;
+
+                    const beta = rsnew / rsold;
+                    for (let i = 0; i < NUM_VERTICES; i++) {
+                        p[i] = r[i] + beta * p[i];
+                    }
+                    rsold = rsnew;
+                }
+
+                for (let i = 0; i < NUM_VERTICES; i++) {
+                    currPositions[i * 2 + dim] = x[i];
+                }
+            }
+        }
+
+        function initARAPStudio(imgElement, objectUrl) {
+            const maxW = window.innerWidth * 0.8;
+            const maxH = window.innerHeight * 0.8;
+            const aspectRatio = imgElement.naturalWidth / imgElement.naturalHeight;
+
+            let w = maxW;
+            let h = maxW / aspectRatio;
+
+            if (h > maxH) {
+                h = maxH;
+                w = maxH * aspectRatio;
+            }
+
+            renderWidth = Math.round(w);
+            renderHeight = Math.round(h);
+
+            stageWrapper.style.width = `${renderWidth}px`;
+            stageWrapper.style.height = `${renderHeight}px`;
+
+            overlayCanvas.width = renderWidth;
+            overlayCanvas.height = renderHeight;
+            overlayCtx = overlayCanvas.getContext('2d');
+
+            buildMeshAndTopology(renderWidth, renderHeight);
+
+            app = new PIXI.Application({
+                width: renderWidth,
+                height: renderHeight,
+                backgroundAlpha: 0,
+                resolution: window.devicePixelRatio || 1,
+                autoDensity: true
+            });
+
+            stageWrapper.appendChild(app.view);
+
+            const texture = PIXI.Texture.from(imgElement);
+
+            const geometry = new PIXI.Geometry()
+                .addAttribute('aVertexPosition', currPositions, 2)
+                .addAttribute('aTextureCoord', uvs, 2)
+                .addIndex(indices);
+
+            mesh = new PIXI.Mesh(geometry, new PIXI.MeshMaterial(texture));
+            app.stage.addChild(mesh);
+
+            setupInteractions();
+
+            app.ticker.add(() => {
+                if (isDragging && activeHandleIdx !== -1) {
+                    solveARAP(3);
+                    mesh.geometry.getBuffer('aVertexPosition').update();
+                }
+                else if (isReleasing && activeHandleIdx !== -1) {
+                    const dt = Math.min(app.ticker.elapsedMS / 1000.0, 0.033);
+
+                    const hx = currPositions[activeHandleIdx * 2];
+                    const hy = currPositions[activeHandleIdx * 2 + 1];
+                    const ox = origPositions[activeHandleIdx * 2];
+                    const oy = origPositions[activeHandleIdx * 2 + 1];
+
+                    const ax = -K_SPRING * (hx - ox) - C_DAMPING * handleVelX;
+                    const ay = -K_SPRING * (hy - oy) - C_DAMPING * handleVelY;
+
+                    handleVelX += ax * dt;
+                    handleVelY += ay * dt;
+
+                    currPositions[activeHandleIdx * 2] += handleVelX * dt;
+                    currPositions[activeHandleIdx * 2 + 1] += handleVelY * dt;
+
+                    solveARAP(3);
+                    mesh.geometry.getBuffer('aVertexPosition').update();
+
+                    const distSq = (hx - ox) * (hx - ox) + (hy - oy) * (hy - oy);
+                    const velSq = handleVelX * handleVelX + handleVelY * handleVelY;
+
+                    if (distSq < 0.01 && velSq < 0.1) {
+                        currPositions[activeHandleIdx * 2] = ox;
+                        currPositions[activeHandleIdx * 2 + 1] = oy;
+                        solveARAP(3);
+                        mesh.geometry.getBuffer('aVertexPosition').update();
+
+                        pinMask[activeHandleIdx] = 1;
+                        isReleasing = false;
+                        activeHandleIdx = -1;
+                        handleVelX = 0.0;
+                        handleVelY = 0.0;
+                    }
+                }
+
+                renderOverlays();
+            });
+        }
+
+        function renderOverlays() {
+            if (!overlayCtx) return;
+            overlayCtx.clearRect(0, 0, renderWidth, renderHeight);
+
+            const deltaSec = app ? app.ticker.elapsedMS / 1000.0 : 0.016;
+            screamManager.updateAndRender(overlayCtx, deltaSec);
+
+            if (activeHandleIdx === -1 || pinMask[activeHandleIdx] !== 2) return;
+
+            const x = currPositions[activeHandleIdx * 2];
+            const y = currPositions[activeHandleIdx * 2 + 1];
+
+            overlayCtx.beginPath();
+            overlayCtx.arc(x, y, 7, 0, Math.PI * 2);
+            overlayCtx.fillStyle = isReleasing ? '#f43f5e' : '#10b981';
+            overlayCtx.strokeStyle = '#ffffff';
+            overlayCtx.lineWidth = 2;
+            overlayCtx.fill();
+            overlayCtx.stroke();
+        }
+
+        function findNearestVertex(mx, my) {
+            let minDistSq = Infinity;
+            let nearestIdx = -1;
+
+            for (let i = 0; i < NUM_VERTICES; i++) {
+                const dx = currPositions[i * 2] - mx;
+                const dy = currPositions[i * 2 + 1] - my;
+                const d2 = dx * dx + dy * dy;
+
+                if (d2 < minDistSq) {
+                    minDistSq = d2;
+                    nearestIdx = i;
+                }
+            }
+            return nearestIdx;
+        }
+
+        function setupInteractions() {
+            if (!app || !app.view) return;
+            const view = app.view;
+
+            view.addEventListener('contextmenu', e => e.preventDefault());
+
+            view.addEventListener('pointerdown', (e) => {
+                const rect = view.getBoundingClientRect();
+                const mx = (e.clientX - rect.left) * (renderWidth / rect.width);
+                const my = (e.clientY - rect.top) * (renderHeight / rect.height);
+
+                const idx = findNearestVertex(mx, my);
+                if (idx === -1) return;
+
+                if (e.button === 2) {
+                    if (pinMask[idx] === 1) {
+                        pinMask[idx] = 0;
+                    } else if (pinMask[idx] === 0) {
+                        pinMask[idx] = 1;
+                    }
+                } else if (e.button === 0) {
+                    isReleasing = false;
+
+                    activeHandleIdx = idx;
+                    pinMask[activeHandleIdx] = 2;
+                    currPositions[activeHandleIdx * 2] = mx;
+                    currPositions[activeHandleIdx * 2 + 1] = my;
+                    isDragging = true;
+                    handleVelX = 0.0;
+                    handleVelY = 0.0;
+
+                    // 弾幕（コメント字幕）の生成および描画登録
+                    const area = getCharacterBottomQuarterArea();
+                    const text = ScreamGenerator.generate();
+                    screamManager.spawn(text, area);
+                }
+            });
+
+            view.addEventListener('pointermove', (e) => {
+                if (!isDragging || activeHandleIdx === -1) return;
+
+                const rect = view.getBoundingClientRect();
+                const mx = (e.clientX - rect.left) * (renderWidth / rect.width);
+                const my = (e.clientY - rect.top) * (renderHeight / rect.height);
+
+                currPositions[activeHandleIdx * 2] = mx;
+                currPositions[activeHandleIdx * 2 + 1] = my;
+            });
+
+            const startReleaseSequence = () => {
+                if (isDragging && activeHandleIdx !== -1) {
+                    isDragging = false;
+                    isReleasing = true;
+                    handleVelX = 0.0;
+                    handleVelY = 0.0;
+                }
+            };
+
+            view.addEventListener('pointerup', startReleaseSequence);
+            view.addEventListener('pointerleave', startReleaseSequence);
+            window.addEventListener('pointerup', startReleaseSequence);
+            window.addEventListener('pointercancel', startReleaseSequence);
+        }
+    </script>
+</body>
+
+</html>
